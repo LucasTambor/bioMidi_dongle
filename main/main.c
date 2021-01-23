@@ -1,26 +1,8 @@
-/*
-   This example code is in the Public Domain (or CC0 licensed, at your option.)
-
-   Unless required by applicable law or agreed to in writing, this
-   software is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR
-   CONDITIONS OF ANY KIND, either express or implied.
-*/
-
-
-
-/****************************************************************************
-*
-* This demo showcases BLE GATT client. It can scan BLE devices and connect to one device.
-* Run the gatt_server demo, the client demo will automatically connect to the gatt_server demo.
-* Client demo will enable gatt_server's notify after connection. The two devices will then exchange
-* data.
-*
-****************************************************************************/
-
 #include <stdint.h>
 #include <string.h>
 #include <stdbool.h>
 #include <stdio.h>
+#include <string.h>
 #include "nvs.h"
 #include "nvs_flash.h"
 
@@ -33,18 +15,28 @@
 #include "esp_log.h"
 #include "freertos/FreeRTOS.h"
 
-#define GATTC_TAG "GATTC_DEMO"
+#define GATTC_TAG "BioMidi DONGLE"
 #define REMOTE_SERVICE_UUID        0x00FF
 #define REMOTE_NOTIFY_CHAR_UUID    0xFF01
 #define PROFILE_NUM      1
 #define PROFILE_A_APP_ID 0
 #define INVALID_HANDLE   0
 
-static const char remote_device_name[] = "ESP_GATTS_DEMO";
+static const char remote_device_name[] = "BioMidi";
 static bool connect    = false;
 static bool get_server = false;
 static esp_gattc_char_elem_t *char_elem_result   = NULL;
 static esp_gattc_descr_elem_t *descr_elem_result = NULL;
+
+const uint8_t midi_service_uuid[16] = {
+    /* LSB <--------------------------------------------------------------------------------> MSB */
+    0x00, 0xC7, 0xC4, 0x4E, 0xE3, 0x6C, 0x51, 0xA7, 0x33, 0x4B, 0xE8, 0xED, 0x5A, 0x0E, 0xB8, 0x03
+};
+
+static const uint8_t midi_characteristics_uuid[16] = {
+    /* LSB <--------------------------------------------------------------------------------> MSB */
+    0xF3, 0x6B, 0x10, 0x9D, 0x66, 0xF2, 0xA9, 0xA1, 0x12, 0x41, 0x68, 0x38, 0xDB, 0xE5, 0x72, 0x77
+};
 
 /* Declare static functions */
 static void esp_gap_cb(esp_gap_ble_cb_event_t event, esp_ble_gap_cb_param_t *param);
@@ -53,13 +45,13 @@ static void gattc_profile_event_handler(esp_gattc_cb_event_t event, esp_gatt_if_
 
 
 static esp_bt_uuid_t remote_filter_service_uuid = {
-    .len = ESP_UUID_LEN_16,
-    .uuid = {.uuid16 = REMOTE_SERVICE_UUID,},
+    .len = ESP_UUID_LEN_128,
+    // .uuid = {.uuid32 = midi_service_uuid,},
 };
 
 static esp_bt_uuid_t remote_filter_char_uuid = {
-    .len = ESP_UUID_LEN_16,
-    .uuid = {.uuid16 = REMOTE_NOTIFY_CHAR_UUID,},
+    .len = ESP_UUID_LEN_128,
+    // .uuid = {.uuid128 = midi_characteristics_uuid,},
 };
 
 static esp_bt_uuid_t notify_descr_uuid = {
@@ -132,6 +124,8 @@ static void gattc_profile_event_handler(esp_gattc_cb_event_t event, esp_gatt_if_
             break;
         }
         ESP_LOGI(GATTC_TAG, "discover service complete conn_id %d", param->dis_srvc_cmpl.conn_id);
+        // Assign service uuid to filter
+        memcpy(remote_filter_service_uuid.uuid.uuid128, midi_service_uuid, ESP_UUID_LEN_128);
         esp_ble_gattc_search_service(gattc_if, param->cfg_mtu.conn_id, &remote_filter_service_uuid);
         break;
     case ESP_GATTC_CFG_MTU_EVT:
@@ -143,7 +137,7 @@ static void gattc_profile_event_handler(esp_gattc_cb_event_t event, esp_gatt_if_
     case ESP_GATTC_SEARCH_RES_EVT: {
         ESP_LOGI(GATTC_TAG, "SEARCH RES: conn_id = %x is primary service %d", p_data->search_res.conn_id, p_data->search_res.is_primary);
         ESP_LOGI(GATTC_TAG, "start handle %d end handle %d current handle value %d", p_data->search_res.start_handle, p_data->search_res.end_handle, p_data->search_res.srvc_id.inst_id);
-        if (p_data->search_res.srvc_id.uuid.len == ESP_UUID_LEN_16 && p_data->search_res.srvc_id.uuid.uuid.uuid16 == REMOTE_SERVICE_UUID) {
+        if (p_data->search_res.srvc_id.uuid.len == ESP_UUID_LEN_128 && !memcmp(p_data->search_res.srvc_id.uuid.uuid.uuid128, midi_service_uuid, ESP_UUID_LEN_128)) {
             ESP_LOGI(GATTC_TAG, "service found");
             get_server = true;
             gl_profile_tab[PROFILE_A_APP_ID].service_start_handle = p_data->search_res.start_handle;
@@ -183,6 +177,8 @@ static void gattc_profile_event_handler(esp_gattc_cb_event_t event, esp_gatt_if_
                 if (!char_elem_result){
                     ESP_LOGE(GATTC_TAG, "gattc no mem");
                 }else{
+                    // Assign char uuid to filter
+                    memcpy(remote_filter_char_uuid.uuid.uuid128, midi_characteristics_uuid, ESP_UUID_LEN_128);
                     status = esp_ble_gattc_get_char_by_uuid( gattc_if,
                                                              p_data->search_cmpl.conn_id,
                                                              gl_profile_tab[PROFILE_A_APP_ID].service_start_handle,
@@ -309,6 +305,10 @@ static void gattc_profile_event_handler(esp_gattc_cb_event_t event, esp_gatt_if_
         connect = false;
         get_server = false;
         ESP_LOGI(GATTC_TAG, "ESP_GATTC_DISCONNECT_EVT, reason = %d", p_data->disconnect.reason);
+        //the unit of the duration is second
+        uint32_t duration = 30;
+        esp_ble_gap_start_scanning(duration);
+
         break;
     default:
         break;
