@@ -14,6 +14,9 @@
 #include "esp_gatt_common_api.h"
 #include "esp_log.h"
 #include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
+
+#include "uart_app.h"
 
 #define GATTC_TAG "BioMidi DONGLE"
 #define REMOTE_SERVICE_UUID        0x00FF
@@ -21,6 +24,10 @@
 #define PROFILE_NUM      1
 #define PROFILE_A_APP_ID 0
 #define INVALID_HANDLE   0
+
+//**********************************************************************************************************
+// Task Handlers
+TaskHandle_t xTaskUartHandle;
 
 static const char remote_device_name[] = "BioMidi";
 static bool connect    = false;
@@ -266,7 +273,14 @@ static void gattc_profile_event_handler(esp_gattc_cb_event_t event, esp_gatt_if_
         }else{
             ESP_LOGI(GATTC_TAG, "ESP_GATTC_NOTIFY_EVT, receive indicate value:");
         }
-        esp_log_buffer_hex(GATTC_TAG, p_data->notify.value, p_data->notify.value_len);
+        // Send to data stream
+        uart_data_t data;
+        memcpy(data.data, p_data->notify.value, p_data->notify.value_len);
+        data.len = p_data->notify.value_len;
+        if(xQueueSend( xQueueUartWriteBuffer, (void *)&data, portMAX_DELAY) == pdFAIL) {
+            ESP_LOGE(GATTC_TAG, "Error sendin data to stream");
+        }
+        // esp_log_buffer_hex(GATTC_TAG, p_data->notify.value, p_data->notify.value_len);
         break;
     case ESP_GATTC_WRITE_DESCR_EVT:
         if (p_data->write.status != ESP_GATT_OK){
@@ -447,6 +461,15 @@ void app_main(void)
     ESP_ERROR_CHECK( ret );
 
     ESP_ERROR_CHECK(esp_bt_controller_mem_release(ESP_BT_MODE_CLASSIC_BT));
+
+    // init data stream task
+    xTaskCreatePinnedToCore(vDataStream,
+                        "vDataStream",
+                        2048*2,
+                        NULL,
+                        configMAX_PRIORITIES,
+                        &xTaskUartHandle,
+                        1);
 
     esp_bt_controller_config_t bt_cfg = BT_CONTROLLER_INIT_CONFIG_DEFAULT();
     ret = esp_bt_controller_init(&bt_cfg);
