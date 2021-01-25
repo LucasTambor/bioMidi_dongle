@@ -17,6 +17,7 @@ class VirtualMidi(object):
     def log(self, msg):
         print("VirtualMidi: {}".format(msg))
 
+
 if __name__ == '__main__':
     midi = VirtualMidi('Test')
     while 1:
